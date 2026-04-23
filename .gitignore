@@ -7,3 +7,8 @@ build/
 *.tar
 *.pyd
 *.egg-info
+*.yuv
+*.bin
+*.err
+*.out
+out_bin/

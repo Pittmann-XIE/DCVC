@@ -87,10 +87,14 @@ Please build the C++ code to support bitstream writing and customized CUDA kerne
 ```bash
 sudo apt-get install cmake g++ ninja-build
 conda activate $YOUR_PY_ENV_NAME
+conda install -c nvidia cuda-nvcc=12.6
 cd ./src/cpp/
 pip install .
 cd ../layers/extensions/inference/
-pip install .
+CUDA_HOME="$CONDA_PREFIX" \
+CC="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-gcc" \
+CXX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-g++" \
+pip install --no-build-isolation -e .
 ```
 
 If the CUDA kernels fail to load successfully in infererence, the standard output will display: ```cannot import cuda implementation for inference, fallback to pytorch.```
@@ -341,3 +345,35 @@ The implementation of DCVC-RT is based on [CompressAI](https://github.com/InterD
 
 ## Trademarks
 This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow [Microsoft’s Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general). Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or logos are subject to those third-party’s policies.
+
+
+
+## Test H.265
+
+### ffmpeg streaming
+
+```
+
+ffmpeg -y \ -f rawvideo \ -pix_fmt yuv420p \ -s 1920x1200 \ -r 30 \ -i S10_R_00_00_1920x1200.yuv \ -frames:v 32 \ -c:v libx265 \ -x265-params qp=32 \ -f hevc \ S10_hevc_q32.hevc
+
+```
+
+### calculate the PSNR after streaming
+
+```
+ffmpeg -i S10_hevc_q32.hevc \
+  -f rawvideo \
+  -pix_fmt yuv420p \
+  -s 1920x1200 \
+  -r 30 \
+  -i S10_R_00_00_1920x1200.yuv \
+  -frames:v 32 \
+  -lavfi "[0:v]settb=AVTB,setpts=PTS-STARTPTS[dist];[1:v]settb=AVTB,setpts=PTS-STARTPTS[ref];[dist][ref]psnr=stats_file=psnr.log" \
+  -f null -
+```
+
+### calculate the compressin ratio for DCVC-RT
+
+```
+python3 -c "import os; raw=1920*1200*32*1.5; comp=os.path.getsize('out_bin/MY_VIDEO/S10_R_00_00_1920x1200.yuv_q0.bin'); print(raw/comp)"
+```

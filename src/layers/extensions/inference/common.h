@@ -6,7 +6,17 @@
 #include <cuda.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include <type_traits>
+#include <utility>
 #include <torch/extension.h>
+
+template <typename T, typename = void>
+struct is_vec4_like : std::false_type {};
+
+template <typename T>
+struct is_vec4_like<T, std::void_t<decltype(std::declval<T>().x), decltype(std::declval<T>().y),
+                                   decltype(std::declval<T>().z), decltype(std::declval<T>().w)>>
+    : std::true_type {};
 
 // T maybe vector type, and may be different from t.dtype
 template <typename T>
@@ -80,13 +90,23 @@ __forceinline__ __device__ bool4 make_vec4(const bool& x, const bool& y, const b
     return t;
 }
 
+__forceinline__ __device__ __half to_cuda_half(const c10::Half& a)
+{
+    return *reinterpret_cast<const __half*>(&a);
+}
+
+__forceinline__ __device__ c10::Half to_c10_half(const __half& a)
+{
+    return *reinterpret_cast<const c10::Half*>(&a);
+}
+
 __forceinline__ __device__ c10::Half round(const c10::Half& a)
 {
-    return static_cast<c10::Half>(__half2int_rn(a));
+    return static_cast<c10::Half>(__half2int_rn(to_cuda_half(a)));
 }
 
 template <typename T>
-__forceinline__ __device__ T round(const T& a)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T>::value, T>::type round(const T& a)
 {
     return make_vec4(round(a.x), round(a.y), round(a.z), round(a.w));
 }
@@ -102,7 +122,7 @@ __forceinline__ __device__ int8_t to_int8(const c10::Half& a)
 }
 
 template <typename T>
-__forceinline__ __device__ char4 to_int8(const T& a)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T>::value, char4>::type to_int8(const T& a)
 {
     return make_char4(to_int8(a.x), to_int8(a.y), to_int8(a.z), to_int8(a.w));
 }
@@ -114,11 +134,11 @@ __forceinline__ __device__ uint8_t to_uint8(const float& a)
 
 __forceinline__ __device__ uint8_t to_uint8(const c10::Half& a)
 {
-    return static_cast<uint8_t>(__half2uint_rd(a));
+    return static_cast<uint8_t>(__half2uint_rd(to_cuda_half(a)));
 }
 
 template <typename T>
-__forceinline__ __device__ uchar4 to_uint8(const T& a)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T>::value, uchar4>::type to_uint8(const T& a)
 {
     return make_uchar4(to_uint8(a.x), to_uint8(a.y), to_uint8(a.z), to_uint8(a.w));
 }
@@ -130,11 +150,11 @@ __forceinline__ __device__ int16_t to_int16(const float& a)
 
 __forceinline__ __device__ int16_t to_int16(const c10::Half& a)
 {
-    return static_cast<int16_t>(__half2int_rd(a));
+    return static_cast<int16_t>(__half2int_rd(to_cuda_half(a)));
 }
 
 template <typename T>
-__forceinline__ __device__ short4 to_int16(const T& a)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T>::value, short4>::type to_int16(const T& a)
 {
     return make_short4(to_int16(a.x), to_int16(a.y), to_int16(a.z), to_int16(a.w));
 }
@@ -146,26 +166,26 @@ __forceinline__ __device__ short4 operator<<(const short4& a, const int b)
 
 __forceinline__ __device__ c10::Half min(const c10::Half& a, const c10::Half& b)
 {
-    return __hmin(a, b);
+    return to_c10_half(__hmin(to_cuda_half(a), to_cuda_half(b)));
 }
 __forceinline__ __device__ c10::Half max(const c10::Half& a, const c10::Half& b)
 {
-    return __hmax(a, b);
+    return to_c10_half(__hmax(to_cuda_half(a), to_cuda_half(b)));
 }
 
 __forceinline__ __device__ bool operator>(const c10::Half& a, const c10::Half& b)
 {
-    return __hgt(a, b);
+    return __hgt(to_cuda_half(a), to_cuda_half(b));
 }
 
 __forceinline__ __device__ bool operator<(const c10::Half& a, const c10::Half& b)
 {
-    return __hlt(a, b);
+    return __hlt(to_cuda_half(a), to_cuda_half(b));
 }
 
 __forceinline__ __device__ c10::Half log(const c10::Half& a)
 {
-    return hlog(a);
+    return to_c10_half(__float2half_rn(logf(__half2float(to_cuda_half(a)))));
 }
 
 __forceinline__ __device__ short4 operator+(const short4& a, const short4& b)
@@ -184,7 +204,8 @@ __forceinline__ __device__ Half4 operator+(const Half4& a, const Half4& b)
 }
 
 template <typename T>
-__forceinline__ __device__ T operator-(const T& a, const T& b)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T>::value, T>::type operator-(const T& a,
+                                                                                            const T& b)
 {
     return make_vec4(a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w);
 }
@@ -205,49 +226,54 @@ __forceinline__ __device__ c10::Half operator*(const c10::Half& a, const bool b)
 }
 
 template <typename T>
-__forceinline__ __device__ T operator*(const T& a, const T& b)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T>::value, T>::type operator*(const T& a,
+                                                                                            const T& b)
 {
     return make_vec4(a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w);
 }
 
 template <typename T>
-__forceinline__ __device__ T operator*(const T& a, const bool4& b)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T>::value, T>::type operator*(const T& a,
+                                                                                             const bool4& b)
 {
     return make_vec4(a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w);
 }
 
 template <typename T1, typename T2>
-__forceinline__ __device__ T1 operator*(const T1& a, const T2& b)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T1>::value, T1>::type operator*(const T1& a,
+                                                                                               const T2& b)
 {
     return make_vec4(a.x * b, a.y * b, a.z * b, a.w * b);
 }
 
 template <typename T>
-__forceinline__ __device__ T max(const T& a, const T& b)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T>::value, T>::type max(const T& a, const T& b)
 {
     return make_vec4(max(a.x, b.x), max(a.y, b.y), max(a.z, b.z), max(a.w, b.w));
 }
 
 template <typename T1, typename T2>
-__forceinline__ __device__ T1 max(const T1& a, const T2& b)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T1>::value, T1>::type max(const T1& a,
+                                                                                         const T2& b)
 {
     return make_vec4(max(a.x, b), max(a.y, b), max(a.z, b), max(a.w, b));
 }
 
 template <typename T>
-__forceinline__ __device__ T min(const T& a, const T& b)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T>::value, T>::type min(const T& a, const T& b)
 {
     return make_vec4(min(a.x, b.x), min(a.y, b.y), min(a.z, b.z), min(a.w, b.w));
 }
 
 template <typename T1, typename T2>
-__forceinline__ __device__ T1 min(const T1& a, const T2& b)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T1>::value, T1>::type min(const T1& a,
+                                                                                         const T2& b)
 {
     return make_vec4(min(a.x, b), min(a.y, b), min(a.z, b), min(a.w, b));
 }
 
 template <typename T>
-__forceinline__ __device__ T log(const T& a)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T>::value, T>::type log(const T& a)
 {
     return make_vec4(log(a.x), log(a.y), log(a.z), log(a.w));
 }
@@ -259,17 +285,18 @@ __forceinline__ __device__ float reciprocal(const float& a)
 
 __forceinline__ __device__ c10::Half reciprocal(const c10::Half& a)
 {
-    return hrcp(a);
+    return to_c10_half(hrcp(to_cuda_half(a)));
 }
 
 template <typename T>
-__forceinline__ __device__ T reciprocal(const T& a)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T>::value, T>::type reciprocal(const T& a)
 {
     return make_vec4(reciprocal(a.x), reciprocal(a.y), reciprocal(a.z), reciprocal(a.w));
 }
 
 template <typename T1, typename T2>
-__forceinline__ __device__ bool4 operator>(const T1& a, const T2& b)
+__forceinline__ __device__ typename std::enable_if<is_vec4_like<T1>::value, bool4>::type operator>(const T1& a,
+                                                                                                  const T2& b)
 {
     return make_vec4(a.x > b, a.y > b, a.z > b, a.w > b);
 }
@@ -286,7 +313,7 @@ __forceinline__ __device__ float wsilu(const float x)
 
 __forceinline__ __device__ c10::Half wsilu(const c10::Half x)
 {
-    return __float2half_rn(wsilu(__half2float(x)));
+    return to_c10_half(__float2half_rn(wsilu(__half2float(to_cuda_half(x)))));
 }
 
 __forceinline__ __device__ float4 wsilu(float4 data)
@@ -315,5 +342,6 @@ __forceinline__ __device__ float multiply_add(const float a, const float b, cons
 __forceinline__ __device__ c10::Half multiply_add(const c10::Half a, const c10::Half b, const c10::Half c)
 {
 
-    return __hfma(a, b, c);
+    return to_c10_half(__float2half_rn(__fmaf_rn(
+        __half2float(to_cuda_half(a)), __half2float(to_cuda_half(b)), __half2float(to_cuda_half(c)))));
 }

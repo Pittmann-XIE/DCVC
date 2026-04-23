@@ -1,0 +1,18 @@
+{
+    "root_path": "/home/fe/xie/1920x1200_yuv",
+    "test_classes": {
+        "MY_VIDEO": {
+            "test": 1,
+            "base_path": "",
+            "src_type": "yuv420",
+            "sequences": {
+                "S10_R_00_00.yuv": {
+                    "width": 1920,
+                    "height": 1200,
+                    "frames": 300,
+                    "intra_period": -1
+                }
+            }
+        }
+    }
+}
