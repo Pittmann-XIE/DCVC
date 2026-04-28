@@ -8,15 +8,16 @@ import torch.nn.functional as F
 
 
 CUSTOMIZED_CUDA_INFERENCE = False
-try:
-    from inference_extensions_cuda import process_with_mask_cuda, combine_for_reading_2x_cuda, \
-        restore_y_2x_cuda, restore_y_4x_cuda, build_index_dec_cuda, \
-        round_and_to_int8_cuda, clamp_reciprocal_with_quant_cuda, bias_quant_cuda, \
-        add_and_multiply_cuda, bias_pixel_shuffle_8_cuda, replicate_pad_cuda, \
-        build_index_enc_cuda, DepthConvProxy, SubpelConv2xProxy  # noqa: F401
-    CUSTOMIZED_CUDA_INFERENCE = True
-except Exception:  # pylint: disable=W0718
-    pass
+if os.environ.get("DCVC_DISABLE_CUSTOM_CUDA") != "1":
+    try:
+        from inference_extensions_cuda import process_with_mask_cuda, combine_for_reading_2x_cuda, \
+            restore_y_2x_cuda, restore_y_4x_cuda, build_index_dec_cuda, \
+            round_and_to_int8_cuda, clamp_reciprocal_with_quant_cuda, bias_quant_cuda, \
+            add_and_multiply_cuda, bias_pixel_shuffle_8_cuda, replicate_pad_cuda, \
+            build_index_enc_cuda, DepthConvProxy, SubpelConv2xProxy  # noqa: F401
+        CUSTOMIZED_CUDA_INFERENCE = True
+    except Exception:  # pylint: disable=W0718
+        pass
 
 
 if not CUSTOMIZED_CUDA_INFERENCE and 'SUPPRESS_CUSTOM_KERNEL_WARNING' not in os.environ:

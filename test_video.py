@@ -7,7 +7,48 @@ import io
 import json
 import multiprocessing
 import os
+from pathlib import Path
+import sys
 import time
+
+
+def _bootstrap_conda_libstdcpp():
+    if os.environ.get("DCVC_LIBSTDCPP_BOOTSTRAPPED") == "1":
+        return
+
+    candidate_prefixes = []
+    for raw_prefix in (
+        os.environ.get("CONDA_PREFIX"),
+        sys.prefix,
+        str(Path(sys.executable).resolve().parent.parent),
+    ):
+        if raw_prefix:
+            prefix = Path(raw_prefix).resolve()
+            if prefix not in candidate_prefixes:
+                candidate_prefixes.append(prefix)
+
+    for prefix in candidate_prefixes:
+        lib_dir = prefix / "lib"
+        libstdcpp = lib_dir / "libstdc++.so.6"
+        if not libstdcpp.is_file():
+            continue
+
+        env = os.environ.copy()
+        env["DCVC_LIBSTDCPP_BOOTSTRAPPED"] = "1"
+        env["LD_LIBRARY_PATH"] = (
+            f"{lib_dir}:{env['LD_LIBRARY_PATH']}"
+            if env.get("LD_LIBRARY_PATH")
+            else str(lib_dir)
+        )
+        env["LD_PRELOAD"] = (
+            f"{libstdcpp}:{env['LD_PRELOAD']}"
+            if env.get("LD_PRELOAD")
+            else str(libstdcpp)
+        )
+        os.execvpe(sys.executable, [sys.executable, *sys.argv], env)
+
+
+_bootstrap_conda_libstdcpp()
 
 import torch
 import numpy as np
@@ -250,7 +291,7 @@ def run_one_point_with_stream(p_frame_net, i_frame_net, args):
 
     if save_decoded_frame:
         if args['src_type'] == 'png':
-            recon_writer = PNGWriter(args['bin_folder'], args['src_width'], args['src_height'])
+            recon_writer = PNGWriter(args['curr_rec_dir'], args['src_width'], args['src_height'])
         elif args['src_type'] == 'yuv420':
             output_yuv_path = args['curr_rec_path'].replace('.yuv', f'_{total_kbps}kbps.yuv')
             recon_writer = YUV420Writer(output_yuv_path, args['src_width'], args['src_height'])
@@ -365,6 +406,7 @@ def worker(args):
     args['curr_bin_path'] = os.path.join(bin_folder,
                                          f"{args['seq']}_q{args['qp_i']}.bin")
     args['curr_rec_path'] = args['curr_bin_path'].replace('.bin', '.yuv')
+    args['curr_rec_dir'] = args['curr_bin_path'].replace('.bin', '_decoded')
     args['curr_json_path'] = args['curr_bin_path'].replace('.bin', '.json')
 
     result = run_one_point_with_stream(p_frame_net, i_frame_net, args)
@@ -374,6 +416,12 @@ def worker(args):
     result['rate_idx'] = args['rate_idx']
     result['qp_i'] = args['qp_i']
     result['qp_p'] = args['qp_p'] if 'qp_p' in args else args['qp_i']
+    result['bitstream_path'] = args['curr_bin_path']
+    result['metrics_path'] = args['curr_json_path']
+    if args['src_type'] == 'png':
+        result['decoded_frame_path'] = args['curr_rec_dir']
+    else:
+        result['decoded_frame_path'] = args['curr_rec_path']
 
     return result
 
